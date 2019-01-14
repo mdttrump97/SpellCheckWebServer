@@ -1,0 +1,149 @@
+1.  Explain why your queue is thread-safe.  Tell, for each operation supported
+    by the queue (i.e., public method), what steps you took to make it
+    thread-safe.  Tell why are sure no one may bypass your safeguards to cause
+    race conditions.
+	My queue has a default constructor (thread_safe_queue.hpp line 14)
+	and a move constructor (line 18), but the copy constructor was explicitly
+        deleted (line 16) to ensure that no copies could be made of the queue. 
+	My queue (line 42), mutex (line 43), and condition variable (line 44) are
+	all private, so the queue data cannot by accessed except through the methods below. 
+
+	thread_safe_queue(thread_safe_queue&& moveable_queue) (line 18):
+		For my move constructor, I used a unique lock on a mutex (line 19) 
+        to protect the queue data from multiple write events that could cause race
+	conditions.
+
+	template<typename T>
+	void enqueue(T item) (line 23):
+		For my public enqueue method, I used a unique lock on a mutex (line 24) to
+	keep my queue thread-safe. Whenever enqueue is called, a unique lock is
+	locked before pushing items onto the queue (line 25). This ensures that only one 
+	thread can access the queue when it is being edited. I then used a condition
+	variable (line 26) to notify one thread that there was an item on the queue. The enqueue
+	method returns nothing, so no pointers or references to queue data can 
+	escape the queue. 
+
+	template<typename T>
+	T dequeue() (line 29): 
+		For my public dequeue method, I used a unique lock on a mutex (line 30) to
+	keep my queue thread-safe. Whenever dequeue is called, a unique lock is 
+	locked before removing items from the queue (lines 30, 31). The first item from the queue 
+	is assigned to the return value (line 35), and then the first item in the queue is
+	popped off of the queue (line 36). The return value is a copy of the item that was
+	dequeued so that there are no escaping pointers or references to the queue.
+
+2.  How many threads did you create to handle requests?  Why did you select
+    this number?  Be sure to reference where in your code you create the
+    threads.
+		I created thread::hardware_concurrency() - 2 threads (2 threads on my laptop)
+   	(line 122 of main.cpp) to handle requests. Four threads were able to run at once on my machine,
+    	so 1 thread would handle requests, another thread would clean the cache (line 128), and then the 
+    	remaining 2 threads would process requests (line 124). 
+
+3.  You should have had at least three global variables in your program: the
+    word list, the distance table, and the cache.  List, for each of these
+    variables, what steps you took to ensure that all accesses to them were
+    thread-safe.  Explain your reasoning.
+	Word list:
+		The word list only needed to be read from, never edited, so		 
+	I made sure that the word list was never modified during the course 
+	of the program. Only the spellcheck method in spell.cpp (line 87) accessed 
+	the word list.
+	
+	Distance Table:
+		The distance table was made thread_local (line 60, spell.cpp) as each
+	thread would need a separate table to update for each separate query while
+	spellchecking. 
+
+	Cache:
+		The cache was made from a thread safe map (line 35, main.cpp) to ensure 
+	that all accesses were thread-safe. Each thread needed to write to the same cache, 
+	so the cache was protected by a unique lock for each write operation (line 35, 
+	thread_safe_map.cpp), and every read operation was protected with a shared mutex 
+	(line 21, thread_safe_map.cpp). 	
+	
+4.  Explain why your map is thread-safe.  Tell, for each operation supported
+    by the map (i.e., public method), what steps you took to make it
+    thread-safe.  Tell why you can be sure no one may bypass your safeguards
+    to cause race conditions.
+	My map has a default constructor (thread_safe_map.hpp line 20)
+	and a move constructor (line 24), but the copy constructor was explicitly
+        deleted (line 22) to ensure that no copies could be made of the queue. 
+	My map (line 63) and shared mutex (line 64) are both private, so the 
+	map data cannot by accessed except through the methods below. 
+
+	thread_safe_map(thread_safe_map&& moveable_map) (line 24):
+		I used a unique lock on the shared mutex (line 30) to ensure that the move
+	operation would be protected from other thread operations and race conditions.
+
+	T2 operator[](T1 key) (line 29):
+		I used a shared lock (line 30) for the bracket operator so that multiple threads
+	could obtain values from the map at the same time. The method returns 
+	the return value by value (line 31) so that no pointers or references to map data are leaked.
+
+	bool contains(T1 key) (line 34):
+		I used a shared lock (line 35) so that threads can check to see if the map contains
+	a certain value while other threads are reading, since no map data is being changed if the 
+	shared lock is locked. The method only returns a boolean (line 40), so no references to 
+	map data can escape.
+
+	void write(T1 key, T2 value) (line 43):
+		I used a unique lock (line 44) because only one thread needs access to the map when writing
+	to the map to avoid race conditions. 
+
+	vector<T1> get_keys() (line 48):
+		I used a shared lock (line 49) because the method does not change any map data. The 
+	keys are placed into a new vector by value (line 52) so that no pointers or references 
+	to map data are leaked. 
+
+	void erase(T1 key) (line 57):
+		I used a unique lock (line 58) because only one thread needs to be able 
+	to access the map while map data is being changed. This method erases a specified key-value 
+	pair and returns nothing. 
+	
+5.  Where in your code do you read and update the cache?  How much
+    syncrhonization do you expect for these operations: how likely are they to
+    block?
+		I read the cache on line 45 of main.cpp in the spellcheck_request method using
+    	contains() method from my thread_safe_map class (line 34, thread_safe_map.hpp) to
+	see if the requested query is already a key in the map. I read the cache value on line
+	46 if the cache already contains a response for the request. The read operations should 
+	only block if a cache write is occurring, but the cache can be read by multiple threads 
+	at once, lowering synchronization. The cache is written to on line 64, and cache writes 
+	are locked with a unique lock using the thread_safe_map write method, so cache writes will
+	be more synchronous if multiple requests all occur at the same time. Since the cache is
+	cleared once a minute, cache reads and writes would be prevented for a short time while the 
+	cache is being cleared. 
+
+6.  Explain your strategy for removing entries from the cache.  Explain why
+    your approach is thread-safe.
+		To remove entries from the cache (line 108 of main.cpp) , I created an 
+	erase method (line 57, thread_safe_map.hpp) that gets a unique lock on the map.
+	The erase() method from the std::map class is then used (line 59, thread_safe_map.hpp)
+	to erase entries by specifying the keys. This approach is thread safe as a unique lock
+	must be aquired to edit the map. No other reads or writes can be performed on 
+	the map while the cache cleaning thread erases keys. 
+
+7.  I asked you to create a second map to store timestamps.  Another option
+    would have been to store the timestamps in the cache along with the
+    results.  Explain the difference between these two operations in terms of
+    synchronization: is one approach more likely to cause blocking than
+    another?
+		If the timestamps were stored in the cache along with the results, 
+	more synchronization would occur as more cache writes would slow things down. For each
+	request, the cache would be written to at least once for the timestamp record, and then 
+	and maybe a second time if the requested answer was not already stored in the cache. With the
+	the timestamp map separated from the request cache, then the request has less write operations.
+	With each request, the timestamp map is written to, but the request cache may not be written to  
+	if the cache already contains the requested answer. With less cache writes, the thread_safe_map 
+	methods that use shared locks can all be performed in parallel for larger chunks of time between 
+	fewer cache writes, so synchronization is lowered by using two separate maps.
+
+8.  (Optional) Tell me something interesting you learned from doing this
+    project.
+		I roughly learned how web servers work behind the scenes. I haven't taken web dev 2, 
+	but since I used a gunicorn webserver during my Leidos internship, I was at least familiar with
+	the concept. It has been fun learning how parallel systems work, and it has been neat figuring out
+	what inspired various Amazon Web Services (asynch functions are kinda like AWS Lambda functions, 
+	futures are kinda like AWS Simple Notification Service) and other tools that I have used but had never
+	fully understood.  
